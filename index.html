@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Procesador Normativo Profesional</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+    
+    /* Barra de Herramientas */
+    .toolbar { background: #1e293b; padding: 10px 20px; display: flex; gap: 10px; align-items: center; border-bottom: 2px solid #3b82f6; }
+    
+    .main-layout { display: flex; flex: 1; overflow: hidden; }
+    
+    /* Área del Editor */
+    .editor-container { flex: 1; padding: 40px; overflow-y: auto; background: #ffffff; color: #1e293b; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
+    .editor-body { outline: none; min-height: 100%; line-height: 1.6; font-size: 14px; text-align: justify; }
+    
+    /* Estilos de Formato */
+    .articulo-bold { font-weight: bold; color: #000; display: block; margin-top: 1.2em; text-decoration: underline; }
+    .indentado { margin-left: 35px; display: block; border-left: 3px solid #cbd5e1; padding-left: 10px; margin-bottom: 0.5em; }
+
+    /* Asistente IA */
+    .ai-sidebar { width: 350px; background: #1e293b; border-left: 1px solid #334155; display: flex; flex-direction: column; }
+    .chat-display { flex: 1; padding: 15px; overflow-y: auto; font-size: 13px; background: #0f172a; }
+    .chat-controls { padding: 15px; background: #1e293b; border-top: 1px solid #334155; }
+    
+    textarea { width: 100%; background: #0f172a; color: white; border: 1px solid #475569; border-radius: 6px; padding: 8px; resize: none; box-sizing: border-box; }
+    
+    /* Botones */
+    .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+    .btn-import { background: #10b981; color: white; }
+    .btn-save { background: #3b82f6; color: white; }
+    .btn-pdf { background: #ef4444; color: white; }
+    .btn-ai { background: #f59e0b; color: #020617; width: 100%; margin-top: 10px; }
+    .btn:hover { filter: brightness(1.2); }
+    .btn:disabled { background: #475569; cursor: not-allowed; }
+
+    .ai-bubble { background: #334155; padding: 10px; border-radius: 8px; margin-top: 10px; color: #38bdf8; border-left: 3px solid #f59e0b; }
+    .status-text { font-size: 11px; color: #94a3b8; margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="btn btn-import" onclick="document.getElementById('fileInput').click()">📁 Cargar Word</button>
+  <button class="btn btn-save" id="btnSave">💾 Guardar Grist</button>
+  <button class="btn btn-pdf" id="btnPdf">📕 Exportar PDF</button>
+  <span id="status" class="status-text">Listo</span>
+  <input type="file" id="fileInput" accept=".docx" style="display:none">
+</div>
+
+<div class="main-layout">
+  <div class="editor-container" id="printableArea">
+    <div id="editor" class="editor-body" contenteditable="true">
+      <p style="color:#94a3b8">El contenido aparecerá aquí al cargar un archivo...</p>
+    </div>
+  </div>
+
+  <div class="ai-sidebar">
+    <div class="chat-display" id="chat">
+      <div class="ai-bubble">🤖 <b>Asistente de Formato</b><br>Puedo aplicar reglas de diseño o analizar el texto. La API Key se pedirá una vez y se guardará en tu navegador.</div>
+    </div>
+    <div class="chat-controls">
+      <textarea id="aiInput" rows="3" placeholder="Escribe una orden (ej: 'Pon saltos de línea tras cada artículo')..."></textarea>
+      <button class="btn btn-ai" id="btnAi">Ejecutar / Consultar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const TABLE_NAME = "Art_DN_RN"; //
+  let currentFileName = "documento_normativo.pdf";
+  
+  grist.ready({ requiredAccess: 'full' }); //
+
+  // CARGAR WORD
+  document.getElementById('fileInput').onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    currentFileName = file.name.replace(".docx", ".pdf");
+    document.getElementById('status').innerText = "Cargando: " + file.name;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const result = await mammoth.convertToHtml({arrayBuffer: event.target.result});
+      let html = result.value
+        .replace(/<p>ARTÍCULO/gi, '<p class="articulo-bold">ARTÍCULO')
+        .replace(/<li>/g, '<li class="indentado">');
+      document.getElementById('editor').innerHTML = html;
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // EXPORTAR PDF CON NOMBRE DINÁMICO
+  document.getElementById('btnPdf').onclick = () => {
+    const element = document.getElementById('printableArea');
+    const opt = {
+      margin: 1,
+      filename: currentFileName, // Nombre basado en el archivo original
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+    };
+    html2pdf().set(opt).from(element).save();
+  };
+
+  // ASISTENTE IA (CON STORAGE DE API KEY)
+  document.getElementById('btnAi').onclick = async () => {
+    const input = document.getElementById('aiInput');
+    const editor = document.getElementById('editor');
+    const chat = document.getElementById('chat');
+    
+    if (!input.value.trim()) return;
+
+    // Recuperar o pedir API Key
+    let apiKey = localStorage.getItem('groq_key');
+    if (!apiKey) {
+      apiKey = prompt("Ingresa tu Groq API Key (se guardará en este navegador):");
+      if (apiKey) localStorage.setItem('groq_key', apiKey);
+      else return;
+    }
+
+    chat.innerHTML += `<div><b>Tú:</b> ${input.value}</div>`;
+    const promptText = input.value;
+    input.value = "";
+
+    try {
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            { role: "system", content: "Eres un editor de leyes. Aplica reglas de formato al texto HTML recibido. Devuelve el HTML corregido." },
+            { role: "user", content: `Orden: ${promptText}\n\nTexto:\n${editor.innerHTML}` }
+          ]
+        })
+      });
+      const data = await resp.json();
+      if (data.choices) {
+        editor.innerHTML = data.choices[0].message.content; // Actualiza el editor
+        chat.innerHTML += `<div class="ai-bubble">✅ Orden procesada con éxito.</div>`;
+      }
+    } catch (err) {
+      chat.innerHTML += `<div style="color:red">Error: ${err.message}</div>`;
+    }
+  };
+
+  // GUARDAR EN GRIST
+  document.getElementById('btnSave').onclick = async () => {
+    const paragraphs = Array.from(document.getElementById('editor').children);
+    const records = paragraphs.map((node, i) => ({
+      Nro_Orden: i + 1,
+      Contenido: node.innerText.trim(),
+      Html_Original: node.outerHTML,
+      Tipo: node.classList.contains('articulo-bold') ? 'Artículo' : 'Párrafo'
+    })).filter(r => r.Contenido !== "");
+
+    try {
+      await grist.docApi.addRecords(TABLE_NAME, records);
+      alert("Éxito: Datos guardados en " + TABLE_NAME);
+    } catch (e) {
+      alert("Error al guardar: " + e.message);
+    }
+  };
+</script>
+</body>
+</html>
